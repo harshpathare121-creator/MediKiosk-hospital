@@ -6,1058 +6,1208 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-
 const db = require('./db');
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'medikiosk-demo-secret';
+const JWT_SECRET =
+  process.env.JWT_SECRET || 'CHANGE_THIS_SECRET_IN_PRODUCTION';
 
+/*
+========================================================
+MEDIKIOSK FILE STRUCTURE
+
+Everything is in the GitHub repository root:
+
+MediKiosk/
+│
+├── server.js
+├── db.js
+├── package.json
+├── index.html
+├── style.css
+├── script.js
+└── uploads/       (created automatically)
+
+There is NO frontend folder.
+There is NO backend folder.
+========================================================
+*/
+
+// Root directory = directory containing server.js
 const ROOT = __dirname;
+
+// Upload directory
 const UPLOAD_DIR = path.join(ROOT, 'uploads');
 
-// Create uploads folder automatically
-if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
+fs.mkdirSync(UPLOAD_DIR, {
+  recursive: true
+});
+
+
+// ======================================================
+// MIDDLEWARE
+// ======================================================
 
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+app.use(
+  express.json({
+    limit: '2mb'
+  })
+);
 
 // Serve uploaded documents
-app.use('/uploads', express.static(UPLOAD_DIR));
+app.use(
+  '/uploads',
+  express.static(UPLOAD_DIR)
+);
 
-// Serve frontend
-app.use(express.static(ROOT));
+// Serve frontend files directly from repository root
+app.use(
+  express.static(ROOT)
+);
 
 
-// ============================================================
-// MULTER - DOCUMENT UPLOAD
-// ============================================================
+// ======================================================
+// FILE UPLOAD
+// ======================================================
 
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, UPLOAD_DIR);
-    },
 
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        const name =
-            Date.now() +
-            '-' +
-            crypto.randomBytes(8).toString('hex') +
-            ext;
+  destination: (_, __, cb) => {
+    cb(null, UPLOAD_DIR);
+  },
 
-        cb(null, name);
-    }
+  filename: (_, file, cb) => {
+
+    const extension =
+      path.extname(file.originalname).toLowerCase();
+
+    cb(
+      null,
+      crypto.randomUUID() + extension
+    );
+  }
+
 });
+
 
 const upload = multer({
-    storage,
 
-    limits: {
-        fileSize: 5 * 1024 * 1024,
-        files: 5
-    },
+  storage,
 
-    fileFilter: (req, file, cb) => {
-        const allowed = [
-            'image/jpeg',
-            'image/png',
-            'image/webp',
-            'application/pdf'
-        ];
+  limits: {
+    files: 5,
+    fileSize: 5 * 1024 * 1024
+  },
 
-        if (allowed.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(
-                new Error(
-                    'Only JPG, PNG, WEBP and PDF files are allowed.'
-                )
-            );
-        }
+  fileFilter: (_, file, cb) => {
+
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf'
+    ];
+
+    const valid =
+      allowedTypes.includes(file.mimetype);
+
+    if (valid) {
+      cb(null, true);
+    } else {
+      cb(
+        new Error(
+          'Only JPG, PNG, WEBP or PDF files are allowed.'
+        )
+      );
     }
+
+  }
+
 });
 
 
-// ============================================================
-// DEMO USERS
-// ============================================================
+// ======================================================
+// HELPER FUNCTIONS
+// ======================================================
 
-const demoUsers = [
+const today = () =>
+  new Date()
+    .toISOString()
+    .slice(0, 10);
+
+
+const now = () =>
+  new Date()
+    .toISOString();
+
+
+const sign = (user) => {
+
+  return jwt.sign(
+
     {
-        username: 'regdesk',
-        password: 'reg123',
-        role: 'registration',
-        department: null
+      id: user.id,
+      role: user.role,
+      department: user.department
     },
 
-    {
-        username: 'bones',
-        password: 'doc123',
-        role: 'doctor',
-        department: 'Orthopedics'
-    },
+    JWT_SECRET,
 
     {
-        username: 'brain',
-        password: 'doc123',
-        role: 'doctor',
-        department: 'Neurology'
-    },
-
-    {
-        username: 'opd',
-        password: 'doc123',
-        role: 'doctor',
-        department: 'General OPD'
-    },
-
-    {
-        username: 'emergency',
-        password: 'doc123',
-        role: 'doctor',
-        department: 'Emergency'
-    },
-
-    {
-        username: 'pediatrics',
-        password: 'doc123',
-        role: 'doctor',
-        department: 'Pediatrics'
-    }
-];
-
-
-// ============================================================
-// DATABASE INITIALIZATION
-// ============================================================
-
-try {
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT,
-            role TEXT,
-            department TEXT
-        )
-    `).run();
-
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS patients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            contact TEXT NOT NULL,
-            email TEXT,
-            preferred_time TEXT,
-            history TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
-
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            department TEXT,
-            queue_no INTEGER,
-            status TEXT DEFAULT 'waiting',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            called_at TEXT,
-            completed_at TEXT
-        )
-    `).run();
-
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            original_name TEXT,
-            stored_name TEXT,
-            mime_type TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
-
-    db.prepare(`
-        CREATE TABLE IF NOT EXISTS followups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            doctor_username TEXT,
-            followup_date TEXT,
-            followup_time TEXT,
-            mode TEXT,
-            meeting_link TEXT,
-            notes TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `).run();
-
-    for (const user of demoUsers) {
-        const existing = db
-            .prepare('SELECT id FROM users WHERE username = ?')
-            .get(user.username);
-
-        if (!existing) {
-            const hashed = bcrypt.hashSync(user.password, 10);
-
-            db.prepare(`
-                INSERT INTO users
-                (username, password, role, department)
-                VALUES (?, ?, ?, ?)
-            `).run(
-                user.username,
-                hashed,
-                user.role,
-                user.department
-            );
-        }
+      expiresIn: '8h'
     }
 
-    console.log('Database initialized.');
+  );
 
-} catch (err) {
-    console.error('Database initialization error:', err);
-}
-
-
-// ============================================================
-// AUTHENTICATION
-// ============================================================
-
-function createToken(user) {
-    return jwt.sign(
-        {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            department: user.department
-        },
-        JWT_SECRET,
-        {
-            expiresIn: '12h'
-        }
-    );
-}
+};
 
 
 function auth(req, res, next) {
-    const header = req.headers.authorization || '';
+
+  try {
+
+    const header =
+      req.headers.authorization || '';
 
     if (!header.startsWith('Bearer ')) {
-        return res.status(401).json({
-            error: 'Authentication required'
-        });
+      throw new Error();
     }
 
-    const token = header.substring(7);
+    const token =
+      header.slice(7);
 
-    try {
-        req.user = jwt.verify(token, JWT_SECRET);
-        next();
+    req.user =
+      jwt.verify(
+        token,
+        JWT_SECRET
+      );
 
-    } catch (err) {
-        return res.status(401).json({
-            error: 'Invalid or expired token'
-        });
-    }
-}
+    next();
 
+  } catch {
 
-function requireRole(role) {
-    return (req, res, next) => {
-        if (!req.user || req.user.role !== role) {
-            return res.status(403).json({
-                error: 'Access denied'
-            });
-        }
-
-        next();
-    };
-}
-
-
-// ============================================================
-// HEALTH
-// ============================================================
-
-app.get('/api/health', (req, res) => {
-    res.json({
-        ok: true,
-        message: 'MediKiosk server is running'
+    res.status(401).json({
+      error: 'Authentication required'
     });
-});
+
+  }
+
+}
 
 
-// ============================================================
-// LOGIN
-// ============================================================
+function role(...roles) {
 
-app.post('/api/login', async (req, res) => {
-    try {
-        const { username, password } = req.body;
+  return (req, res, next) => {
 
-        if (!username || !password) {
-            return res.status(400).json({
-                error: 'Username and password are required'
-            });
-        }
+    if (
+      roles.includes(
+        req.user.role
+      )
+    ) {
 
-        const user = db
-            .prepare('SELECT * FROM users WHERE username = ?')
-            .get(username);
+      return next();
 
-        if (!user) {
-            return res.status(401).json({
-                error: 'Invalid username or password'
-            });
-        }
-
-        const valid = await bcrypt.compare(
-            password,
-            user.password
-        );
-
-        if (!valid) {
-            return res.status(401).json({
-                error: 'Invalid username or password'
-            });
-        }
-
-        const token = createToken(user);
-
-        res.json({
-            ok: true,
-            token,
-            user: {
-                username: user.username,
-                role: user.role,
-                department: user.department
-            }
-        });
-
-    } catch (err) {
-        console.error(err);
-
-        res.status(500).json({
-            error: 'Login failed'
-        });
     }
-});
+
+    res.status(403).json({
+      error: 'Not allowed'
+    });
+
+  };
+
+}
 
 
-// ============================================================
-// DEPARTMENTS
-// ============================================================
+function validContact(contact) {
 
-app.get('/api/departments', (req, res) => {
-    res.json([
-        'Orthopedics',
-        'Neurology',
-        'Emergency',
-        'General OPD',
-        'Pediatrics'
-    ]);
-});
+  return /^\d{10}$/.test(
+    String(contact || '')
+  );
+
+}
 
 
-// ============================================================
-// PATIENT REGISTRATION
-// ============================================================
+function validEmail(email) {
+
+  return (
+    !email ||
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+  );
+
+}
+
+
+// ======================================================
+// HEALTH CHECK
+// ======================================================
+
+app.get(
+  '/api/health',
+  (req, res) => {
+
+    res.json({
+      ok: true,
+      date: today()
+    });
+
+  }
+);
+
+
+// ======================================================
+// LOGIN
+// ======================================================
 
 app.post(
-    '/api/patients',
-    upload.array('documents', 5),
-    (req, res) => {
+  '/api/login',
+  (req, res) => {
 
-        try {
-            const {
-                name,
-                contact,
-                email,
-                preferred_time,
-                history,
-                department
-            } = req.body;
+    const {
+      username,
+      password
+    } = req.body || {};
 
-            // Name
-            if (!name || !name.trim()) {
-                return res.status(400).json({
-                    error: 'Patient name is required'
-                });
-            }
+    const user =
+      db
+        .prepare(
+          'SELECT * FROM users WHERE username=?'
+        )
+        .get(
+          username || ''
+        );
 
-            // Contact must be exactly 10 digits
-            if (!/^\d{10}$/.test(contact || '')) {
-                return res.status(400).json({
-                    error: 'Contact number must contain exactly 10 digits'
-                });
-            }
+    if (
+      !user ||
+      !bcrypt.compareSync(
+        password || '',
+        user.password_hash
+      )
+    ) {
 
-            // Optional email validation
-            if (
-                email &&
-                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-            ) {
-                return res.status(400).json({
-                    error: 'Invalid email address'
-                });
-            }
+      return res.status(401).json({
+        error:
+          'Invalid username or password'
+      });
 
-            if (!department) {
-                return res.status(400).json({
-                    error: 'Department is required'
-                });
-            }
-
-            // Create patient
-            const patientResult = db.prepare(`
-                INSERT INTO patients
-                (name, contact, email, preferred_time, history)
-                VALUES (?, ?, ?, ?, ?)
-            `).run(
-                name.trim(),
-                contact,
-                email || null,
-                preferred_time || null,
-                history || null
-            );
-
-            const patientId = patientResult.lastInsertRowid;
-
-            // Get today's queue number
-            const todayCount = db.prepare(`
-                SELECT COUNT(*) AS count
-                FROM queue
-                WHERE department = ?
-                AND date(created_at) = date('now')
-            `).get(department);
-
-            const queueNo = todayCount.count + 1;
-
-            // Add to queue
-            db.prepare(`
-                INSERT INTO queue
-                (patient_id, department, queue_no, status)
-                VALUES (?, ?, ?, 'waiting')
-            `).run(
-                patientId,
-                department,
-                queueNo
-            );
-
-            // Save documents
-            if (req.files && req.files.length > 0) {
-
-                const insertDocument = db.prepare(`
-                    INSERT INTO documents
-                    (
-                        patient_id,
-                        original_name,
-                        stored_name,
-                        mime_type
-                    )
-                    VALUES (?, ?, ?, ?)
-                `);
-
-                for (const file of req.files) {
-                    insertDocument.run(
-                        patientId,
-                        file.originalname,
-                        file.filename,
-                        file.mimetype
-                    );
-                }
-            }
-
-            res.json({
-                ok: true,
-                patientId,
-                queueNo,
-                department
-            });
-
-        } catch (err) {
-
-            console.error('Patient registration error:', err);
-
-            // Remove uploaded files if database operation fails
-            if (req.files) {
-                for (const file of req.files) {
-                    try {
-                        fs.unlinkSync(file.path);
-                    } catch {}
-                }
-            }
-
-            res.status(500).json({
-                error: 'Patient registration failed'
-            });
-        }
     }
+
+    res.json({
+
+      token: sign(user),
+
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        name: user.name,
+        department: user.department
+      }
+
+    });
+
+  }
 );
 
 
-// ============================================================
-// DOCUMENT URL
-// ============================================================
+// ======================================================
+// DEPARTMENTS
+// ======================================================
 
-function documentUrl(req, storedName) {
+app.get(
+  '/api/departments',
+  (req, res) => {
 
-    return (
-        req.protocol +
-        '://' +
-        req.get('host') +
-        '/uploads/' +
-        encodeURIComponent(storedName)
+    const departments =
+      db
+        .prepare(
+          `
+          SELECT
+            id,
+            name,
+            department
+          FROM users
+          WHERE role='doctor'
+          ORDER BY department, name
+          `
+        )
+        .all();
+
+    res.json(
+
+      departments.map(
+        x => ({
+          id: x.id,
+          name: x.department,
+          doctor: x.name
+        })
+      )
+
     );
-}
+
+  }
+);
 
 
-// ============================================================
-// PATIENT QUEUE INFORMATION
-// ============================================================
+// ======================================================
+// PATIENT REGISTRATION
+// ======================================================
 
-app.get('/api/queue/:queueNo', (req, res) => {
+app.post(
+  '/api/patients',
+  upload.array('documents', 5),
+  (req, res) => {
 
     try {
 
-        const queueNo = Number(req.params.queueNo);
+      const {
+        name,
+        contact,
+        email,
+        preferredTime,
+        history,
+        department,
+        privacyHistory
+      } = req.body || {};
 
-        const current = db.prepare(`
-            SELECT
-                q.*,
-                p.name
-            FROM queue q
-            JOIN patients p
-                ON p.id = q.patient_id
-            WHERE q.queue_no = ?
-            AND date(q.created_at) = date('now')
-            ORDER BY q.id DESC
-            LIMIT 1
-        `).get(queueNo);
 
-        if (!current) {
-            return res.status(404).json({
-                error: 'Queue number not found'
-            });
-        }
+      if (
+        !name?.trim() ||
+        !validContact(contact) ||
+        !validEmail(email) ||
+        !department
+      ) {
 
-        const ahead = db.prepare(`
-            SELECT COUNT(*) AS count
-            FROM queue
-            WHERE department = ?
-            AND date(created_at) = date('now')
-            AND queue_no < ?
-            AND status != 'completed'
-        `).get(
-            current.department,
-            current.queue_no
-        );
+        return res.status(400).json({
 
-        res.json({
-            ok: true,
-            queueNo: current.queue_no,
-            department: current.department,
-            status: current.status,
-            peopleAhead: ahead.count
+          error:
+            'Name, valid 10-digit contact and department are required. Email is optional but must be valid when entered.'
+
         });
 
-    } catch (err) {
-
-        console.error(err);
-
-        res.status(500).json({
-            error: 'Unable to fetch queue'
-        });
-    }
-});
+      }
 
 
-// ============================================================
-// REGISTRATION DESK QUEUE
-// ============================================================
+      const date = today();
+      const stamp = now();
 
-app.get(
-    '/api/registration/queue',
-    auth,
-    requireRole('registration'),
-    (req, res) => {
 
-        try {
+      const transaction =
+        db.transaction(() => {
 
-            const rows = db.prepare(`
+          // ----------------------------
+          // CREATE PATIENT
+          // ----------------------------
+
+          const patient =
+            db
+              .prepare(
+                `
+                INSERT INTO patients
+                (
+                  name,
+                  contact,
+                  email,
+                  preferred_time,
+                  history,
+                  created_at,
+                  created_date,
+                  privacy_history
+                )
+                VALUES
+                (?,?,?,?,?,?,?,?)
+                `
+              )
+              .run(
+
+                name.trim(),
+
+                contact,
+
+                email?.trim() || null,
+
+                preferredTime || null,
+
+                history?.trim() || null,
+
+                stamp,
+
+                date,
+
+                privacyHistory === '0'
+                  ? 0
+                  : 1
+
+              );
+
+
+          // ----------------------------
+          // FIND DOCTOR
+          // ----------------------------
+
+          const doctor =
+            db
+              .prepare(
+                `
                 SELECT
-                    q.id,
-                    q.queue_no,
-                    q.department,
-                    q.status,
-                    q.created_at,
-                    p.name,
-                    p.contact
-                FROM queue q
-                JOIN patients p
-                    ON p.id = q.patient_id
-                WHERE date(q.created_at) = date('now')
-                ORDER BY q.department, q.queue_no
-            `).all();
-
-            res.json({
-                ok: true,
-                queue: rows
-            });
-
-        } catch (err) {
-
-            console.error(err);
-
-            res.status(500).json({
-                error: 'Unable to fetch registration queue'
-            });
-        }
-    }
-);
-
-
-// ============================================================
-// DOCTOR - PATIENT LIST
-// ============================================================
-
-app.get(
-    '/api/doctors/me/patients',
-    auth,
-    requireRole('doctor'),
-    (req, res) => {
-
-        try {
-
-            const rows = db.prepare(`
-                SELECT
-                    q.id AS queue_id,
-                    q.queue_no,
-                    q.department,
-                    q.status,
-                    q.created_at,
-                    p.id AS patient_id,
-                    p.name,
-                    p.contact,
-                    p.preferred_time
-                FROM queue q
-                JOIN patients p
-                    ON p.id = q.patient_id
-                WHERE q.department = ?
-                AND date(q.created_at) = date('now')
-                ORDER BY
-                    CASE
-                        WHEN q.status = 'called' THEN 1
-                        WHEN q.status = 'waiting' THEN 2
-                        WHEN q.status = 'completed' THEN 3
-                    END,
-                    q.queue_no
-            `).all(req.user.department);
-
-            res.json({
-                ok: true,
-                patients: rows
-            });
-
-        } catch (err) {
-
-            console.error(err);
-
-            res.status(500).json({
-                error: 'Unable to fetch patients'
-            });
-        }
-    }
-);
-
-
-// ============================================================
-// DOCTOR - PATIENT DETAILS
-// ============================================================
-
-app.get(
-    '/api/doctors/me/patient/:id',
-    auth,
-    requireRole('doctor'),
-    (req, res) => {
-
-        try {
-
-            const patientId = Number(req.params.id);
-
-            const patient = db.prepare(`
-                SELECT
-                    p.*,
-                    q.id AS queue_id,
-                    q.queue_no,
-                    q.department,
-                    q.status,
-                    q.created_at AS queue_created_at
-                FROM patients p
-                JOIN queue q
-                    ON q.patient_id = p.id
-                WHERE p.id = ?
-                AND q.department = ?
-                ORDER BY q.id DESC
+                  id,
+                  department
+                FROM users
+                WHERE role='doctor'
+                  AND department=?
+                ORDER BY id
                 LIMIT 1
-            `).get(
-                patientId,
-                req.user.department
-            );
+                `
+              )
+              .get(
+                department
+              );
 
-            if (!patient) {
-                return res.status(404).json({
-                    error: 'Patient not found or not assigned to you'
-                });
-            }
 
-            const documents = db.prepare(`
-                SELECT
-                    id,
+          // ----------------------------
+          // QUEUE NUMBER
+          // ----------------------------
+
+          const count =
+            db
+              .prepare(
+                `
+                SELECT COUNT(*) c
+                FROM queue
+                WHERE queue_date=?
+                  AND department=?
+                `
+              )
+              .get(
+                date,
+                department
+              ).c + 1;
+
+
+          const prefix =
+            department
+              .split(/\s+/)
+              .map(
+                x => x[0]
+              )
+              .join('')
+              .slice(0, 3)
+              .toUpperCase() ||
+            'OPD';
+
+
+          const queueNumber =
+            `${prefix}-${String(count).padStart(3, '0')}`;
+
+
+          // ----------------------------
+          // CREATE QUEUE
+          // ----------------------------
+
+          const queue =
+            db
+              .prepare(
+                `
+                INSERT INTO queue
+                (
+                  patient_id,
+                  queue_no,
+                  department,
+                  assigned_doctor_id,
+                  status,
+                  created_at,
+                  queue_date
+                )
+                VALUES
+                (?,?,?,?,?,?,?)
+                `
+              )
+              .run(
+
+                patient.lastInsertRowid,
+
+                queueNumber,
+
+                department,
+
+                doctor?.id || null,
+
+                'Waiting',
+
+                stamp,
+
+                date
+
+              );
+
+
+          // ----------------------------
+          // SAVE DOCUMENTS
+          // ----------------------------
+
+          if (req.files) {
+
+            for (
+              const file of req.files
+            ) {
+
+              db
+                .prepare(
+                  `
+                  INSERT INTO documents
+                  (
+                    patient_id,
                     original_name,
                     stored_name,
-                    mime_type,
                     created_at
-                FROM documents
-                WHERE patient_id = ?
-                ORDER BY id DESC
-            `).all(patientId);
-
-            // IMPORTANT:
-            // Give doctor a real URL for every uploaded document.
-            const formattedDocuments = documents.map(d => ({
-                id: d.id,
-                original_name: d.original_name,
-                mime_type: d.mime_type,
-                created_at: d.created_at,
-                url: documentUrl(req, d.stored_name)
-            }));
-
-            res.json({
-                ok: true,
-
-                patient: {
-                    id: patient.id,
-                    name: patient.name,
-                    contact: patient.contact,
-                    email: patient.email,
-                    preferred_time: patient.preferred_time,
-                    history: patient.history,
-
-                    queue_no: patient.queue_no,
-                    department: patient.department,
-                    status: patient.status,
-                    queue_created_at: patient.queue_created_at
-                },
-
-                documents: formattedDocuments
-            });
-
-        } catch (err) {
-
-            console.error(err);
-
-            res.status(500).json({
-                error: 'Unable to fetch patient details'
-            });
-        }
-    }
-);
-
-
-// ============================================================
-// DOCTOR - CALL PATIENT
-// ============================================================
-
-app.post(
-    '/api/doctors/queue/:id/call',
-    auth,
-    requireRole('doctor'),
-    (req, res) => {
-
-        try {
-
-            const queueId = Number(req.params.id);
-
-            const item = db.prepare(`
-                SELECT *
-                FROM queue
-                WHERE id = ?
-                AND department = ?
-            `).get(
-                queueId,
-                req.user.department
-            );
-
-            if (!item) {
-                return res.status(404).json({
-                    error: 'Queue entry not found'
-                });
-            }
-
-            db.prepare(`
-                UPDATE queue
-                SET status = 'called',
-                    called_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            `).run(queueId);
-
-            res.json({
-                ok: true,
-                message: 'Patient called'
-            });
-
-        } catch (err) {
-
-            console.error(err);
-
-            res.status(500).json({
-                error: 'Unable to call patient'
-            });
-        }
-    }
-);
-
-
-// ============================================================
-// DOCTOR - COMPLETE PATIENT
-// ============================================================
-
-app.post(
-    '/api/doctors/queue/:id/complete',
-    auth,
-    requireRole('doctor'),
-    (req, res) => {
-
-        try {
-
-            const queueId = Number(req.params.id);
-
-            const item = db.prepare(`
-                SELECT *
-                FROM queue
-                WHERE id = ?
-                AND department = ?
-            `).get(
-                queueId,
-                req.user.department
-            );
-
-            if (!item) {
-                return res.status(404).json({
-                    error: 'Queue entry not found'
-                });
-            }
-
-            db.prepare(`
-                UPDATE queue
-                SET status = 'completed',
-                    completed_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            `).run(queueId);
-
-            res.json({
-                ok: true,
-                message: 'Patient consultation completed'
-            });
-
-        } catch (err) {
-
-            console.error(err);
-
-            res.status(500).json({
-                error: 'Unable to complete patient'
-            });
-        }
-    }
-);
-
-
-// ============================================================
-// FOLLOW-UP
-// ============================================================
-
-app.post(
-    '/api/doctors/followups',
-    auth,
-    requireRole('doctor'),
-    (req, res) => {
-
-        try {
-
-            const {
-                patient_id,
-                followup_date,
-                followup_time,
-                mode,
-                notes
-            } = req.body;
-
-            if (!patient_id || !followup_date || !followup_time) {
-                return res.status(400).json({
-                    error: 'Patient, date and time are required'
-                });
-            }
-
-            const patient = db.prepare(`
-                SELECT p.id
-                FROM patients p
-                JOIN queue q
-                    ON q.patient_id = p.id
-                WHERE p.id = ?
-                AND q.department = ?
-                LIMIT 1
-            `).get(
-                patient_id,
-                req.user.department
-            );
-
-            if (!patient) {
-                return res.status(404).json({
-                    error: 'Patient not assigned to you'
-                });
-            }
-
-            let meetingLink = null;
-
-            if (mode === 'online') {
-                meetingLink =
-                    'https://meet.google.com/medikiosk-demo-' +
-                    crypto.randomBytes(4).toString('hex');
-            }
-
-            db.prepare(`
-                INSERT INTO followups
-                (
-                    patient_id,
-                    doctor_username,
-                    followup_date,
-                    followup_time,
-                    mode,
-                    meeting_link,
-                    notes
+                  )
+                  VALUES
+                  (?,?,?,?)
+                  `
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `).run(
-                patient_id,
-                req.user.username,
-                followup_date,
-                followup_time,
-                mode || 'in-person',
-                meetingLink,
-                notes || null
-            );
+                .run(
 
-            res.json({
-                ok: true,
-                meetingLink
-            });
+                  patient.lastInsertRowid,
 
-        } catch (err) {
+                  file.originalname,
 
-            console.error(err);
+                  file.filename,
 
-            res.status(500).json({
-                error: 'Unable to schedule follow-up'
-            });
-        }
+                  stamp
+
+                );
+
+            }
+
+          }
+
+
+          return {
+
+            id:
+              patient.lastInsertRowid,
+
+            queueId:
+              queue.lastInsertRowid,
+
+            queueNo:
+              queueNumber
+
+          };
+
+        });
+
+
+      res.status(201).json(
+        transaction()
+      );
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(400).json({
+        error:
+          error.message ||
+          'Patient registration failed'
+      });
+
     }
+
+  }
 );
 
 
-// ============================================================
-// DOCTOR FOLLOW-UPS
-// ============================================================
+// ======================================================
+// QUEUE STATUS
+// ======================================================
 
 app.get(
-    '/api/doctors/me/followups',
-    auth,
-    requireRole('doctor'),
-    (req, res) => {
+  '/api/queue/:queueNo',
+  (req, res) => {
 
-        try {
+    const queue =
+      db
+        .prepare(
+          `
+          SELECT
+            q.*,
+            p.name,
+            p.contact,
+            p.email,
+            p.preferred_time
+          FROM queue q
+          JOIN patients p
+            ON p.id=q.patient_id
+          WHERE q.queue_no=?
+            AND q.queue_date=?
+          `
+        )
+        .get(
+          req.params.queueNo,
+          today()
+        );
 
-            const rows = db.prepare(`
-                SELECT
-                    f.*,
-                    p.name AS patient_name
-                FROM followups f
-                JOIN patients p
-                    ON p.id = f.patient_id
-                WHERE f.doctor_username = ?
-                ORDER BY
-                    f.followup_date,
-                    f.followup_time
-            `).all(req.user.username);
 
-            res.json({
-                ok: true,
-                followups: rows
-            });
+    if (!queue) {
 
-        } catch (err) {
+      return res.status(404).json({
 
-            console.error(err);
+        error:
+          'Queue number not found for today'
 
-            res.status(500).json({
-                error: 'Unable to fetch follow-ups'
-            });
-        }
+      });
+
     }
+
+
+    const ahead =
+      db
+        .prepare(
+          `
+          SELECT COUNT(*) c
+          FROM queue
+          WHERE queue_date=?
+            AND department=?
+            AND status IN
+              ('Waiting','Called')
+            AND id<?
+          `
+        )
+        .get(
+          today(),
+          queue.department,
+          queue.id
+        ).c;
+
+
+    res.json({
+
+      queueNo:
+        queue.queue_no,
+
+      name:
+        queue.name,
+
+      department:
+        queue.department,
+
+      status:
+        queue.status,
+
+      ahead,
+
+      estimatedMinutes:
+        ahead * 5
+
+    });
+
+  }
 );
 
 
-// ============================================================
-// MULTER / GENERAL ERROR HANDLER
-// ============================================================
+// ======================================================
+// REGISTRATION QUEUE
+// ======================================================
 
-app.use((err, req, res, next) => {
+app.get(
+  '/api/registration/queue',
+  auth,
+  role('registration'),
+  (req, res) => {
+
+    res.json(
+
+      db
+        .prepare(
+          `
+          SELECT
+            q.id,
+            q.queue_no,
+            q.status,
+            q.department,
+            q.created_at,
+            p.name,
+            p.contact,
+            p.email
+          FROM queue q
+          JOIN patients p
+            ON p.id=q.patient_id
+          WHERE q.queue_date=?
+          ORDER BY q.id
+          `
+        )
+        .all(
+          today()
+        )
+
+    );
+
+  }
+);
+
+
+// ======================================================
+// DOCTOR PATIENTS
+// ======================================================
+
+app.get(
+  '/api/doctors/me/patients',
+  auth,
+  role('doctor'),
+  (req, res) => {
+
+    res.json(
+
+      db
+        .prepare(
+          `
+          SELECT
+            q.id,
+            q.queue_no,
+            q.status,
+            q.department,
+            q.created_at,
+            p.id patient_id,
+            p.name,
+            p.contact,
+            p.email,
+            p.preferred_time,
+            p.history
+          FROM queue q
+          JOIN patients p
+            ON p.id=q.patient_id
+          WHERE q.queue_date=?
+            AND q.assigned_doctor_id=?
+            AND q.status IN
+              ('Waiting','Called')
+          ORDER BY q.id
+          `
+        )
+        .all(
+          today(),
+          req.user.id
+        )
+
+    );
+
+  }
+);
+
+
+// ======================================================
+// DOCTOR PATIENT DETAILS
+// ======================================================
+
+app.get(
+  '/api/doctors/me/patient/:id',
+  auth,
+  role('doctor'),
+  (req, res) => {
+
+    const patient =
+      db
+        .prepare(
+          `
+          SELECT
+            p.*,
+            q.queue_no,
+            q.department,
+            q.status
+          FROM patients p
+          JOIN queue q
+            ON q.patient_id=p.id
+          WHERE p.id=?
+            AND q.assigned_doctor_id=?
+          ORDER BY q.id DESC
+          LIMIT 1
+          `
+        )
+        .get(
+          req.params.id,
+          req.user.id
+        );
+
+
+    if (!patient) {
+
+      return res.status(404).json({
+
+        error:
+          'Patient not assigned to you'
+
+      });
+
+    }
+
+
+    const documents =
+      db
+        .prepare(
+          `
+          SELECT
+            id,
+            original_name,
+            created_at
+          FROM documents
+          WHERE patient_id=?
+          ORDER BY id DESC
+          `
+        )
+        .all(
+          patient.id
+        );
+
+
+    const followups =
+      db
+        .prepare(
+          `
+          SELECT
+            f.*,
+            u.name doctor_name
+          FROM followups f
+          JOIN users u
+            ON u.id=f.doctor_id
+          WHERE f.patient_id=?
+          ORDER BY f.followup_at DESC
+          `
+        )
+        .all(
+          patient.id
+        );
+
+
+    res.json({
+
+      ...patient,
+
+      documents,
+
+      followups
+
+    });
+
+  }
+);
+
+
+// ======================================================
+// CALL PATIENT
+// ======================================================
+
+app.post(
+  '/api/doctors/queue/:id/call',
+  auth,
+  role('doctor'),
+  (req, res) => {
+
+    const result =
+      db
+        .prepare(
+          `
+          UPDATE queue
+          SET status='Called'
+          WHERE id=?
+            AND assigned_doctor_id=?
+            AND status='Waiting'
+          `
+        )
+        .run(
+          req.params.id,
+          req.user.id
+        );
+
+
+    if (!result.changes) {
+
+      return res.status(400).json({
+
+        error:
+          'Patient cannot be called'
+
+      });
+
+    }
+
+
+    res.json({
+      ok: true
+    });
+
+  }
+);
+
+
+// ======================================================
+// COMPLETE PATIENT
+// ======================================================
+
+app.post(
+  '/api/doctors/queue/:id/complete',
+  auth,
+  role('doctor'),
+  (req, res) => {
+
+    const result =
+      db
+        .prepare(
+          `
+          UPDATE queue
+          SET status='Completed'
+          WHERE id=?
+            AND assigned_doctor_id=?
+            AND status IN
+              ('Waiting','Called')
+          `
+        )
+        .run(
+          req.params.id,
+          req.user.id
+        );
+
+
+    if (!result.changes) {
+
+      return res.status(400).json({
+
+        error:
+          'Patient cannot be completed'
+
+      });
+
+    }
+
+
+    res.json({
+      ok: true
+    });
+
+  }
+);
+
+
+// ======================================================
+// CREATE FOLLOW-UP
+// ======================================================
+
+app.post(
+  '/api/doctors/followups',
+  auth,
+  role('doctor'),
+  (req, res) => {
+
+    const {
+      patientId,
+      followupAt,
+      mode,
+      reminderMinutes
+    } = req.body || {};
+
+
+    const patient =
+      db
+        .prepare(
+          `
+          SELECT p.id
+          FROM patients p
+          JOIN queue q
+            ON q.patient_id=p.id
+          WHERE p.id=?
+            AND q.assigned_doctor_id=?
+          LIMIT 1
+          `
+        )
+        .get(
+          patientId,
+          req.user.id
+        );
+
+
+    if (
+      !patient ||
+      !followupAt ||
+      ![
+        'Online',
+        'In-person'
+      ].includes(mode)
+    ) {
+
+      return res.status(400).json({
+
+        error:
+          'Invalid follow-up'
+
+      });
+
+    }
+
+
+    const meetingLink =
+      mode === 'Online'
+        ? `https://meet.google.com/medikiosk-${crypto
+            .randomBytes(4)
+            .toString('hex')}`
+        : null;
+
+
+    const result =
+      db
+        .prepare(
+          `
+          INSERT INTO followups
+          (
+            patient_id,
+            doctor_id,
+            followup_at,
+            mode,
+            meeting_link,
+            reminder_minutes
+          )
+          VALUES
+          (?,?,?,?,?,?)
+          `
+        )
+        .run(
+
+          patientId,
+
+          req.user.id,
+
+          followupAt,
+
+          mode,
+
+          meetingLink,
+
+          Number(
+            reminderMinutes
+          ) || 30
+
+        );
+
+
+    res.status(201).json({
+
+      id:
+        result.lastInsertRowid,
+
+      meetingLink
+
+    });
+
+  }
+);
+
+
+// ======================================================
+// DOCTOR FOLLOW-UPS
+// ======================================================
+
+app.get(
+  '/api/doctors/me/followups',
+  auth,
+  role('doctor'),
+  (req, res) => {
+
+    res.json(
+
+      db
+        .prepare(
+          `
+          SELECT
+            f.*,
+            p.name patient_name
+          FROM followups f
+          JOIN patients p
+            ON p.id=f.patient_id
+          WHERE f.doctor_id=?
+            AND f.status='Scheduled'
+          ORDER BY f.followup_at
+          `
+        )
+        .all(
+          req.user.id
+        )
+
+    );
+
+  }
+);
+
+
+// ======================================================
+// FRONTEND FALLBACK
+// ======================================================
+
+/*
+IMPORTANT:
+
+There is NO frontend folder.
+
+index.html is directly in the same
+directory as server.js.
+
+Therefore:
+
+ROOT = __dirname
+
+and:
+
+index.html = ROOT/index.html
+*/
+
+app.get(
+  '*',
+  (req, res) => {
+
+    res.sendFile(
+      path.join(
+        ROOT,
+        'index.html'
+      )
+    );
+
+  }
+);
+
+
+// ======================================================
+// ERROR HANDLER
+// ======================================================
+
+app.use(
+  (err, req, res, next) => {
 
     console.error(err);
 
-    if (err instanceof multer.MulterError) {
+    res.status(400).json({
 
-        return res.status(400).json({
-            error: err.message
-        });
-    }
+      error:
+        err.message ||
+        'Request failed'
 
-    if (err) {
+    });
 
-        return res.status(400).json({
-            error: err.message || 'Request failed'
-        });
-    }
-
-    next();
-});
+  }
+);
 
 
-// ============================================================
-// FRONTEND FALLBACK
-// ============================================================
-
-app.get('*', (req, res) => {
-
-    res.sendFile(
-        path.join(ROOT, 'index.html')
-    );
-});
-
-
-// ============================================================
+// ======================================================
 // START SERVER
-// ============================================================
+// ======================================================
 
-app.listen(PORT, () => {
+app.listen(
+  PORT,
+  () => {
 
     console.log(
-        `MediKiosk running on port ${PORT}`
+      `MediKiosk running on port ${PORT}`
     );
-});
+
+  }
+);
