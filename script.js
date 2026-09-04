@@ -1,21 +1,996 @@
-const $=s=>document.querySelector(s); const app=$('#app'); let token=localStorage.getItem('mk_token'), me=JSON.parse(localStorage.getItem('mk_user')||'null');
-const t={en:{reg:'Register for OPD',queue:'Check My Queue',regdesk:'Registration Desk',doctor:'Doctor Login',about:'About MediKiosk',help:'Help'},hi:{reg:'OPD के लिए पंजीकरण',queue:'मेरी कतार देखें',regdesk:'पंजीकरण डेस्क',doctor:'डॉक्टर लॉगिन',about:'MediKiosk के बारे में',help:'मदद'},mr:{reg:'OPD नोंदणी',queue:'माझी रांग पहा',regdesk:'नोंदणी डेस्क',doctor:'डॉक्टर लॉगिन',about:'MediKiosk बद्दल',help:'मदत'}};
-function toast(x){const e=$('#toast');e.textContent=x;e.className='show';setTimeout(()=>e.className='',2500)}
-async function api(url,opt={}){opt.headers=opt.headers||{};if(token)opt.headers.Authorization='Bearer '+token;const r=await fetch('/api'+url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Request failed');return d}
-function home(){app.innerHTML=`<div class="wrap"><section class="hero"><h1>MediKiosk</h1><p>Simple OPD registration and queue tracking for patients, registration staff and doctors.</p><div class="actions"><button onclick="registerPage()">${t[$('#lang').value].reg}</button><button class="secondary" onclick="queuePage()">${t[$('#lang').value].queue}</button></div></section><div class="grid"><div class="card imagecard" style="background-image:url('images/registration.jpg')"><h3>${t[$('#lang').value].regdesk}</h3></div><div class="card imagecard" style="background-image:url('images/queue.jpg')"><h3>${t[$('#lang').value].queue}</h3></div><div class="card imagecard" style="background-image:url('images/doctor.jpg')"><h3>${t[$('#lang').value].doctor}</h3></div></div><div class="credit">Group — Just vibing</div></div><button class="help" onclick="help()">?</button>`}
-async function registerPage(){let ds=await api('/departments');app.innerHTML=`<div class="wrap"><div class="card form"><h2>${t[$('#lang').value].reg}</h2><div class="notice">Contact number must be exactly 10 digits. Email is optional.</div><div class="field"><label>Name *</label><input id="name" required></div><div class="field"><label>Contact *</label><input id="contact" type="tel" inputmode="numeric" maxlength="10"></div><div class="field"><label>Email ID (Optional)</label><input id="email" type="email" placeholder="example@email.com"></div><div class="field"><label>Preferred time</label><input id="time" type="time"></div><div class="field"><label>Department *</label><select id="dept"><option value="">Select department</option>${ds.map(x=>`<option>${x.name}</option>`).join('')}</select></div><div class="field"><label>Medical history (Optional)</label><textarea id="history"></textarea></div><div class="field"><label>Prescription / medicine images (Optional)</label><input id="files" type="file" accept="image/*,.pdf" multiple></div><div class="actions"><button onclick="submitPatient()">Get Queue Number</button><button class="secondary" onclick="home()">Home</button></div></div></div>`;$('#contact').oninput=()=>$('#contact').value=$('#contact').value.replace(/\D/g,'').slice(0,10)}
-async function submitPatient(){const fd=new FormData();['name','contact','email','time','history'].forEach(id=>fd.append(id==='time'?'preferredTime':id,$('#'+id).value));fd.append('department',$('#dept').value);[...$('#files').files].forEach(f=>fd.append('documents',f));try{const r=await api('/patients',{method:'POST',body:fd});localStorage.setItem('mk_last_queue',r.queueNo);queueResult(r.queueNo)}catch(e){toast(e.message)}}
-function queuePage(){app.innerHTML=`<div class="wrap"><div class="card form"><h2>${t[$('#lang').value].queue}</h2><div class="field"><label>Queue number</label><input id="q" placeholder="OPD-001"></div><div class="actions"><button onclick="queueResult($('#q').value.trim())">Check</button><button class="secondary" onclick="home()">Home</button></div></div></div>`}
-async function queueResult(q){if(!q)return;try{const d=await api('/queue/'+encodeURIComponent(q));app.innerHTML=`<div class="wrap"><div class="card form"><p class="muted">${d.department}</p><div class="queueNo">${d.queueNo}</div><h2>${d.name}</h2><p>Status: <span class="pill">${d.status}</span></p><p><b>${d.ahead}</b> patient(s) ahead</p><p>Estimated wait: about <b>${d.estimatedMinutes} minutes</b></p><button onclick="queueResult('${d.queueNo}')">Refresh</button> <button class="secondary" onclick="home()">Home</button></div></div>`}catch(e){toast(e.message)}}
-function login(kind){const bg=kind==='registration'?'regbg':'docbg';app.innerHTML=`<div class="wrap"><div class="loginbg ${bg}"><div class="card loginbox"><h2>${kind==='registration'?'Registration Desk Login':'Doctor Login'}</h2><div class="field"><label>Username</label><input id="u"></div><div class="field"><label>Password</label><input id="p" type="password"></div><div class="actions"><button onclick="doLogin('${kind}')">Login</button><button class="secondary" onclick="home()">Home</button></div><p class="small muted">Demo accounts: registration: regdesk / reg123. Doctors: bones, brain, opd, emergency, pediatrics / doc123</p></div></div></div>`}
-async function doLogin(kind){try{const d=await api('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('#u').value,password:$('#p').value})});if((kind==='registration'&&d.user.role!=='registration')||(kind==='doctor'&&d.user.role!=='doctor'))throw Error('Wrong dashboard for this account');token=d.token;me=d.user;localStorage.setItem('mk_token',token);localStorage.setItem('mk_user',JSON.stringify(me));kind==='registration'?regDash():docDash()}catch(e){toast(e.message)}}
-async function regDash(){try{const rows=await api('/registration/queue');app.innerHTML=`<div class="wrap"><div class="card"><h2>Registration Desk</h2><p class="muted">Registration staff can enqueue patients and see only basic queue details.</p><div class="tablewrap"><table><tr><th>Queue</th><th>Name</th><th>Contact</th><th>Department</th><th>Status</th></tr>${rows.map(r=>`<tr><td>${r.queue_no}</td><td>${r.name}</td><td>${r.contact}</td><td>${r.department}</td><td>${r.status}</td></tr>`).join('')}</table></div><div class="actions"><button onclick="regDash()">Refresh</button><button class="secondary" onclick="logout()">Logout</button></div></div></div>`}catch(e){logout();toast(e.message)}}
-async function docDash(){try{const rows=await api('/doctors/me/patients');const fs=await api('/doctors/me/followups');app.innerHTML=`<div class="wrap"><div class="card"><h2>${me.name}</h2><p class="muted">${me.department}</p><h3>Assigned Patients</h3><div class="tablewrap"><table><tr><th>Queue</th><th>Patient</th><th>Status</th><th>Action</th></tr>${rows.map(r=>`<tr><td>${r.queue_no}</td><td>${r.name}</td><td>${r.status}</td><td><button onclick="patient('${r.patient_id}')">Open File</button> <button onclick="callP(${r.id})">Call</button> <button onclick="completeP(${r.id})">Complete</button></td></tr>`).join('')}</table></div><h3>Upcoming Follow-ups</h3>${fs.map(f=>`<div class="notice"><b>${f.patient_name}</b> — ${new Date(f.followup_at).toLocaleString()} — ${f.mode}${f.meeting_link?`<br><a href="${f.meeting_link}" target="_blank">${f.meeting_link}</a>`:''}</div>`).join('')||'<p class="muted">No scheduled follow-ups.</p>'}<div class="actions"><button onclick="docDash()">Refresh</button><button class="secondary" onclick="logout()">Logout</button></div></div></div>`}catch(e){logout();toast(e.message)}}
-async function patient(id){try{const p=await api('/doctors/me/patient/'+id);app.innerHTML=`<div class="wrap"><div class="card"><button class="secondary" onclick="docDash()">← Back</button><h2>${p.name}</h2><p><b>Contact:</b> ${p.contact}<br><b>Email:</b> ${p.email||'Not provided'}<br><b>Department:</b> ${p.department}</p><h3>Medical History</h3><p>${p.history||'Not provided'}</p><h3>Documents</h3>${p.documents.map(d=>`<p>${d.original_name}</p>`).join('')||'<p class="muted">No documents uploaded.</p>'}<h3>Follow-up</h3><div class="grid"><div class="field"><label>Date & time</label><input id="fu" type="datetime-local"></div><div class="field"><label>Mode</label><select id="mode"><option>In-person</option><option>Online</option></select></div><div class="field"><label>Reminder</label><select id="rem"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="60">60 min</option></select></div></div><button onclick="follow(${p.id})">Schedule Follow-up</button></div></div>`}catch(e){toast(e.message)}}
-async function follow(id){try{const d=await api('/doctors/followups',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({patientId:id,followupAt:$('#fu').value,mode:$('#mode').value,reminderMinutes:$('#rem').value})});toast(d.meetingLink?'Online follow-up scheduled':'Follow-up scheduled');docDash()}catch(e){toast(e.message)}}
-async function callP(id){try{await api('/doctors/queue/'+id+'/call',{method:'POST'});docDash()}catch(e){toast(e.message)}}async function completeP(id){try{await api('/doctors/queue/'+id+'/complete',{method:'POST'});docDash()}catch(e){toast(e.message)}}
-function logout(){token=null;me=null;localStorage.removeItem('mk_token');localStorage.removeItem('mk_user');home()}
-function help(){app.insertAdjacentHTML('beforeend',`<div class="modal" onclick="this.remove()"><div class="card" onclick="event.stopPropagation()"><button class="close" onclick="this.parentElement.parentElement.remove()">Close</button><h2>How to Register</h2><ol><li>Enter your name and 10-digit contact number.</li><li>Email is optional; if entered, use a valid email.</li><li>Select your OPD department.</li><li>Add medical history or prescription images only if you want to.</li><li>Submit and keep your queue number.</li><li>Use Check My Queue to see patients ahead of you.</li></ol></div></div>`)}
-function about(){app.insertAdjacentHTML('beforeend',`<div class="modal" onclick="this.remove()"><div class="card" onclick="event.stopPropagation()"><button class="close" onclick="this.parentElement.parentElement.remove()">Close</button><h2>About MediKiosk</h2><p>Hospital OPD queue and patient information management prototype.</p><h3>Group</h3><p><b>Just vibing</b></p></div></div>`)}
-$('#lang').onchange=home;$('#menuBtn').onclick=()=>{app.insertAdjacentHTML('beforeend',`<div class="modal" onclick="this.remove()"><div class="card" onclick="event.stopPropagation()"><button class="close" onclick="this.parentElement.parentElement.remove()">Close</button><h2>Menu</h2><div class="actions"><button onclick="login('registration');this.parentElement.parentElement.parentElement.remove()">Registration Desk</button><button onclick="login('doctor');this.parentElement.parentElement.parentElement.remove()">Doctor Login</button><button class="secondary" onclick="about();this.parentElement.parentElement.parentElement.remove()">About</button></div></div></div>`) };
-home();
+// ============================================================
+// MediKiosk Frontend
+// ============================================================
+
+const API_BASE = '/api';
+
+
+// ============================================================
+// BASIC HELPERS
+// ============================================================
+
+function $(id) {
+    return document.getElementById(id);
+}
+
+
+function escapeHtml(value) {
+
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+
+function escapeAttr(value) {
+    return escapeHtml(value);
+}
+
+
+function showToast(message) {
+
+    const toast = $('toast');
+
+    if (!toast) return;
+
+    toast.textContent = message;
+    toast.classList.add('show');
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 3000);
+}
+
+
+function getToken() {
+    return localStorage.getItem('medikiosk_token');
+}
+
+
+function getUser() {
+
+    try {
+        return JSON.parse(
+            localStorage.getItem('medikiosk_user') || 'null'
+        );
+    } catch {
+        return null;
+    }
+}
+
+
+function saveLogin(data) {
+
+    localStorage.setItem(
+        'medikiosk_token',
+        data.token
+    );
+
+    localStorage.setItem(
+        'medikiosk_user',
+        JSON.stringify(data.user)
+    );
+}
+
+
+function logout() {
+
+    localStorage.removeItem('medikiosk_token');
+    localStorage.removeItem('medikiosk_user');
+
+    location.reload();
+}
+
+
+// ============================================================
+// API HELPER
+// ============================================================
+
+async function api(path, options = {}) {
+
+    const headers = options.headers || {};
+
+    if (!(options.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+    }
+
+    const token = getToken();
+
+    if (token) {
+        headers['Authorization'] =
+            'Bearer ' + token;
+    }
+
+    const response = await fetch(
+        API_BASE + path,
+        {
+            ...options,
+            headers
+        }
+    );
+
+    let data;
+
+    try {
+        data = await response.json();
+    } catch {
+        data = {};
+    }
+
+    if (!response.ok) {
+
+        throw new Error(
+            data.error ||
+            'Something went wrong'
+        );
+    }
+
+    return data;
+}
+
+
+// ============================================================
+// APP
+// ============================================================
+
+const app = $('app');
+
+
+// ============================================================
+// HOME
+// ============================================================
+
+function home() {
+
+    if (!app) return;
+
+    app.innerHTML = `
+        <div class="hero">
+            <div class="wrap">
+                <div class="card">
+                    <h1>MediKiosk</h1>
+
+                    <p>
+                        Digital patient registration,
+                        document management and OPD queue system.
+                    </p>
+
+                    <div class="actions">
+
+                        <button onclick="patientRegistration()">
+                            Patient Registration
+                        </button>
+
+                        <button
+                            class="secondary"
+                            onclick="openLogin()">
+                            Staff Login
+                        </button>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+
+// ============================================================
+// PATIENT REGISTRATION
+// ============================================================
+
+async function patientRegistration() {
+
+    try {
+
+        const departments =
+            await api('/departments');
+
+        app.innerHTML = `
+            <div class="wrap">
+
+                <div class="card">
+
+                    <button
+                        class="secondary"
+                        onclick="home()">
+                        Back
+                    </button>
+
+                    <h2>Patient Registration</h2>
+
+                    <form
+                        class="form"
+                        id="patientForm">
+
+                        <label>
+                            Patient Name
+                            <input
+                                type="text"
+                                name="name"
+                                required>
+                        </label>
+
+                        <label>
+                            Contact Number
+                            <input
+                                type="tel"
+                                name="contact"
+                                maxlength="10"
+                                pattern="[0-9]{10}"
+                                placeholder="10 digit number"
+                                required>
+                        </label>
+
+                        <label>
+                            Email
+                            <span class="muted">
+                                Optional
+                            </span>
+
+                            <input
+                                type="email"
+                                name="email"
+                                placeholder="example@email.com">
+                        </label>
+
+                        <label>
+                            Department
+
+                            <select
+                                name="department"
+                                required>
+
+                                <option value="">
+                                    Select Department
+                                </option>
+
+                                ${departments.map(d => `
+                                    <option value="${escapeAttr(d)}">
+                                        ${escapeHtml(d)}
+                                    </option>
+                                `).join('')}
+
+                            </select>
+                        </label>
+
+                        <label>
+                            Preferred Time
+
+                            <input
+                                type="time"
+                                name="preferred_time">
+                        </label>
+
+                        <label>
+                            Medical History
+                            <span class="muted">
+                                Optional
+                            </span>
+
+                            <textarea
+                                name="history"
+                                rows="5"
+                                placeholder="Enter previous medical history, symptoms, medicines, allergies, etc."></textarea>
+                        </label>
+
+                        <label>
+                            Upload Medical Documents
+                            <span class="muted">
+                                Optional — max 5 files, 5 MB each
+                            </span>
+
+                            <input
+                                type="file"
+                                name="documents"
+                                id="documents"
+                                multiple
+                                accept=".jpg,.jpeg,.png,.webp,.pdf">
+                        </label>
+
+                        <button type="submit">
+                            Register Patient
+                        </button>
+
+                    </form>
+
+                </div>
+
+            </div>
+        `;
+
+        $('patientForm').addEventListener(
+            'submit',
+            submitPatient
+        );
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// SUBMIT PATIENT
+// ============================================================
+
+async function submitPatient(event) {
+
+    event.preventDefault();
+
+    const form = event.target;
+
+    const contact =
+        form.contact.value.trim();
+
+    if (!/^\d{10}$/.test(contact)) {
+
+        showToast(
+            'Contact number must contain exactly 10 digits.'
+        );
+
+        return;
+    }
+
+    if (
+        form.email.value &&
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+            form.email.value.trim()
+        )
+    ) {
+
+        showToast(
+            'Please enter a valid email address.'
+        );
+
+        return;
+    }
+
+    const files =
+        $('documents').files;
+
+    if (files.length > 5) {
+
+        showToast(
+            'You can upload a maximum of 5 files.'
+        );
+
+        return;
+    }
+
+    for (const file of files) {
+
+        if (file.size > 5 * 1024 * 1024) {
+
+            showToast(
+                `${file.name} is larger than 5 MB.`
+            );
+
+            return;
+        }
+    }
+
+    const formData =
+        new FormData(form);
+
+    try {
+
+        const result =
+            await api(
+                '/patients',
+                {
+                    method: 'POST',
+                    body: formData
+                }
+            );
+
+        app.innerHTML = `
+            <div class="wrap">
+
+                <div class="card">
+
+                    <h2>Registration Successful</h2>
+
+                    <p>
+                        Patient has been added to the OPD queue.
+                    </p>
+
+                    <div class="queueNo">
+                        ${escapeHtml(result.queueNo)}
+                    </div>
+
+                    <p>
+                        Department:
+                        <strong>
+                            ${escapeHtml(result.department)}
+                        </strong>
+                    </p>
+
+                    <button onclick="home()">
+                        Done
+                    </button>
+
+                </div>
+
+            </div>
+        `;
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// LOGIN
+// ============================================================
+
+function openLogin() {
+
+    app.innerHTML = `
+        <div class="wrap">
+
+            <div class="card">
+
+                <button
+                    class="secondary"
+                    onclick="home()">
+                    Back
+                </button>
+
+                <h2>Staff Login</h2>
+
+                <form
+                    class="form"
+                    id="loginForm">
+
+                    <label>
+                        Username
+
+                        <input
+                            name="username"
+                            required>
+                    </label>
+
+                    <label>
+                        Password
+
+                        <input
+                            type="password"
+                            name="password"
+                            required>
+                    </label>
+
+                    <button type="submit">
+                        Login
+                    </button>
+
+                </form>
+
+                <p class="small muted">
+                    Demo Registration:
+                    regdesk / reg123
+                </p>
+
+                <p class="small muted">
+                    Demo Doctors:
+                    bones / brain / opd /
+                    emergency / pediatrics
+                    <br>
+                    Password:
+                    doc123
+                </p>
+
+            </div>
+
+        </div>
+    `;
+
+    $('loginForm').addEventListener(
+        'submit',
+        submitLogin
+    );
+}
+
+
+async function submitLogin(event) {
+
+    event.preventDefault();
+
+    const form = event.target;
+
+    try {
+
+        const result =
+            await api(
+                '/login',
+                {
+                    method: 'POST',
+
+                    body: JSON.stringify({
+                        username:
+                            form.username.value.trim(),
+
+                        password:
+                            form.password.value
+                    })
+                }
+            );
+
+        saveLogin(result);
+
+        if (result.user.role === 'doctor') {
+
+            doctorDashboard();
+
+        } else {
+
+            registrationDashboard();
+        }
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// REGISTRATION DASHBOARD
+// ============================================================
+
+async function registrationDashboard() {
+
+    const user = getUser();
+
+    if (!user || user.role !== 'registration') {
+        openLogin();
+        return;
+    }
+
+    try {
+
+        const result =
+            await api('/registration/queue');
+
+        app.innerHTML = `
+            <div class="wrap">
+
+                <div class="card">
+
+                    <div class="actions">
+
+                        <h2>
+                            Registration Desk
+                        </h2>
+
+                        <button
+                            class="secondary"
+                            onclick="logout()">
+                            Logout
+                        </button>
+
+                    </div>
+
+                    <div class="tablewrap">
+
+                        <table>
+
+                            <thead>
+                                <tr>
+                                    <th>Queue</th>
+                                    <th>Name</th>
+                                    <th>Contact</th>
+                                    <th>Department</th>
+                                    <th>Status</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+
+                                ${result.queue.map(q => `
+                                    <tr>
+
+                                        <td>
+                                            ${escapeHtml(q.queue_no)}
+                                        </td>
+
+                                        <td>
+                                            ${escapeHtml(q.name)}
+                                        </td>
+
+                                        <td>
+                                            ${escapeHtml(q.contact)}
+                                        </td>
+
+                                        <td>
+                                            ${escapeHtml(q.department)}
+                                        </td>
+
+                                        <td>
+                                            ${escapeHtml(q.status)}
+                                        </td>
+
+                                        <td>
+                                            ${escapeHtml(q.created_at)}
+                                        </td>
+
+                                    </tr>
+                                `).join('')}
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </div>
+        `;
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// DOCTOR DASHBOARD
+// ============================================================
+
+async function doctorDashboard() {
+
+    const user = getUser();
+
+    if (!user || user.role !== 'doctor') {
+        openLogin();
+        return;
+    }
+
+    try {
+
+        const result =
+            await api('/doctors/me/patients');
+
+        app.innerHTML = `
+            <div class="wrap">
+
+                <div class="card">
+
+                    <div class="actions">
+
+                        <div>
+                            <h2>Doctor Dashboard</h2>
+
+                            <p class="muted">
+                                Department:
+                                ${escapeHtml(user.department)}
+                            </p>
+                        </div>
+
+                        <button
+                            class="secondary"
+                            onclick="logout()">
+                            Logout
+                        </button>
+
+                    </div>
+
+                    <div class="grid">
+
+                        ${result.patients.map(p => `
+                            <div class="card">
+
+                                <div class="pill">
+                                    Queue ${escapeHtml(p.queue_no)}
+                                </div>
+
+                                <h3>
+                                    ${escapeHtml(p.name)}
+                                </h3>
+
+                                <p>
+                                    Contact:
+                                    ${escapeHtml(p.contact)}
+                                </p>
+
+                                <p>
+                                    Status:
+                                    <strong>
+                                        ${escapeHtml(p.status)}
+                                    </strong>
+                                </p>
+
+                                <div class="actions">
+
+                                    <button
+                                        onclick="doctorPatient(${Number(p.patient_id)})">
+                                        View Patient
+                                    </button>
+
+                                    ${
+                                        p.status !== 'completed'
+                                        ? `
+                                            <button
+                                                class="secondary"
+                                                onclick="callPatient(${Number(p.queue_id)})">
+                                                Call
+                                            </button>
+
+                                            <button
+                                                class="secondary"
+                                                onclick="completePatient(${Number(p.queue_id)})">
+                                                Complete
+                                            </button>
+                                        `
+                                        : ''
+                                    }
+
+                                </div>
+
+                            </div>
+                        `).join('')}
+
+                    </div>
+
+                </div>
+
+            </div>
+        `;
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// DOCTOR PATIENT DETAILS
+// ============================================================
+
+async function doctorPatient(id) {
+
+    try {
+
+        const result =
+            await api(
+                '/doctors/me/patient/' + id
+            );
+
+        const p = result.patient;
+
+        app.innerHTML = `
+            <div class="wrap">
+
+                <div class="card">
+
+                    <button
+                        class="secondary"
+                        onclick="doctorDashboard()">
+                        Back to Patients
+                    </button>
+
+                    <h2>
+                        Patient Details
+                    </h2>
+
+                    <div class="card">
+
+                        <h3>
+                            ${escapeHtml(p.name)}
+                        </h3>
+
+                        <p>
+                            <strong>Contact:</strong>
+                            ${escapeHtml(p.contact)}
+                        </p>
+
+                        ${
+                            p.email
+                            ? `
+                                <p>
+                                    <strong>Email:</strong>
+                                    ${escapeHtml(p.email)}
+                                </p>
+                            `
+                            : ''
+                        }
+
+                        <p>
+                            <strong>Department:</strong>
+                            ${escapeHtml(p.department)}
+                        </p>
+
+                        <p>
+                            <strong>Queue Number:</strong>
+                            ${escapeHtml(p.queue_no)}
+                        </p>
+
+                        <p>
+                            <strong>Status:</strong>
+                            ${escapeHtml(p.status)}
+                        </p>
+
+                        <h3>
+                            Medical History
+                        </h3>
+
+                        <div class="notice">
+                            ${
+                                p.history
+                                ? escapeHtml(p.history)
+                                : 'No medical history provided.'
+                            }
+                        </div>
+
+                    </div>
+
+
+                    <!-- =================================================
+                         DOCUMENTS
+                         ================================================= -->
+
+                    <div class="card">
+
+                        <h3>
+                            Uploaded Documents
+                        </h3>
+
+                        ${
+                            result.documents &&
+                            result.documents.length
+                            ? result.documents.map(d => `
+
+                                <div class="notice">
+
+                                    <strong>
+                                        ${escapeHtml(d.original_name)}
+                                    </strong>
+
+                                    <div class="actions">
+
+                                        <!-- OPEN DOCUMENT -->
+                                        <a
+                                            href="${escapeAttr(d.url)}"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="button">
+                                            Open / View
+                                        </a>
+
+                                        <!-- DOWNLOAD DOCUMENT -->
+                                        <a
+                                            href="${escapeAttr(d.url)}"
+                                            download="${escapeAttr(d.original_name)}"
+                                            class="button secondary">
+                                            Download
+                                        </a>
+
+                                    </div>
+
+                                </div>
+
+                            `).join('')
+
+                            : `
+                                <p class="muted">
+                                    No documents uploaded.
+                                </p>
+                            `
+                        }
+
+                    </div>
+
+                </div>
+
+            </div>
+        `;
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// CALL PATIENT
+// ============================================================
+
+async function callPatient(id) {
+
+    try {
+
+        await api(
+            '/doctors/queue/' + id + '/call',
+            {
+                method: 'POST'
+            }
+        );
+
+        showToast(
+            'Patient has been called.'
+        );
+
+        doctorDashboard();
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// COMPLETE PATIENT
+// ============================================================
+
+async function completePatient(id) {
+
+    try {
+
+        await api(
+            '/doctors/queue/' + id + '/complete',
+            {
+                method: 'POST'
+            }
+        );
+
+        showToast(
+            'Patient consultation completed.'
+        );
+
+        doctorDashboard();
+
+    } catch (err) {
+
+        showToast(err.message);
+    }
+}
+
+
+// ============================================================
+// INITIALIZE
+// ============================================================
+
+function initializeApp() {
+
+    const user = getUser();
+
+    if (!user) {
+
+        home();
+        return;
+    }
+
+    if (user.role === 'doctor') {
+
+        doctorDashboard();
+
+    } else if (
+        user.role === 'registration'
+    ) {
+
+        registrationDashboard();
+
+    } else {
+
+        home();
+    }
+}
+
+
+initializeApp();
