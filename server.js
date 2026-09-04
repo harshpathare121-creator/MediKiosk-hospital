@@ -18,7 +18,7 @@ fs.mkdirSync(UPLOAD_DIR, {recursive:true});
 app.use(cors());
 app.use(express.json({limit:'2mb'}));
 app.use('/uploads', express.static(UPLOAD_DIR));
-app.use(express.static(path.join(ROOT,'frontend')));
+app.use(express.static(ROOT));
 
 const storage = multer.diskStorage({
  destination: (_,__,cb)=>cb(null,UPLOAD_DIR),
