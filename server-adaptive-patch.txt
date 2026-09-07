@@ -1,0 +1,35 @@
+
+Add these changes to the existing flat server.js.
+
+1. In the patients table add:
+current_issue TEXT,
+adaptive_questionnaire TEXT,
+
+2. For an existing database, after db.exec(...) add:
+try { db.exec("ALTER TABLE patients ADD COLUMN current_issue TEXT"); } catch {}
+try { db.exec("ALTER TABLE patients ADD COLUMN adaptive_questionnaire TEXT"); } catch {}
+
+3. In POST /api/patients read:
+const currentIssue = String(req.body.currentIssue || "").trim();
+const adaptiveQuestionnaire = String(req.body.adaptiveQuestionnaire || "").trim();
+
+4. Add current_issue and adaptive_questionnaire to the INSERT and save:
+currentIssue || null,
+adaptiveQuestionnaire || null,
+
+5. In the doctor patient SELECT include:
+p.current_issue,p.adaptive_questionnaire
+
+6. Return:
+currentIssue: patient.current_issue,
+adaptiveQuestionnaire: patient.adaptive_questionnaire
+
+7. In the existing frontend register() function, after FormData is created,
+call:
+appendAdaptiveToFormData(fd)
+
+Do not append an old history value after that call, because it would overwrite
+the adaptive summary.
+
+The questionnaire collects symptoms and organizes them for the doctor. It does
+not diagnose the patient.
